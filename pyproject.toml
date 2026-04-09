@@ -1,0 +1,36 @@
+[project]
+name = "gh-clean"
+version = "0.1.0"
+description = "Remote GitHub branch cleanup reporting tool"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+  { name = "Timothy Mansfield" }
+]
+requires-python = ">=3.9"
+keywords = ["github", "git", "branches", "cleanup", "cli"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Version Control :: Git",
+  "Topic :: Utilities",
+]
+
+[project.scripts]
+gh-clean = "gh_clean.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/manzoid/gh-clean"
+Repository = "https://github.com/manzoid/gh-clean"
+Issues = "https://github.com/manzoid/gh-clean/issues"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
