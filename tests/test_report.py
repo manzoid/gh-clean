@@ -2,7 +2,16 @@ import unittest
 from unittest import mock
 
 from gh_clean.config import ConfigError, RepoConfig, parse_config_yaml, parse_protected_branches_csv
-from gh_clean.report import classify_branch, generate_report, match_ruleset_branch, recommendation_for
+from gh_clean.report import (
+    BranchReport,
+    ReportResult,
+    branch_summary_reason,
+    classify_branch,
+    format_summary,
+    generate_report,
+    match_ruleset_branch,
+    recommendation_for,
+)
 
 
 def make_branch(name: str, sha: str = "abc123", protected: bool = False):
@@ -214,6 +223,96 @@ class GenerateReportOverrideTests(unittest.TestCase):
         mock_resolve_repo_config.assert_called_once_with(
             client,
             protected_branches_override="main,staging",
+        )
+
+
+class SummaryFormatTests(unittest.TestCase):
+    def test_branch_summary_reason_for_tip_mismatch(self):
+        branch = BranchReport(
+            name="feature/a",
+            tip_sha="sha",
+            excluded_reasons=[],
+            protection_status="known",
+            role="has-head-prs",
+            lifecycle="merged",
+            vetoes=[],
+            warnings=["tip-differs-from-merged-head:162"],
+            recommendation="review",
+            observed_at="2026-04-09T22:00:00+00:00",
+        )
+        self.assertEqual(
+            branch_summary_reason(branch),
+            "review because the branch moved after merged PR #162",
+        )
+
+    def test_format_summary_groups_branches(self):
+        report = ReportResult(
+            repo="owner/repo",
+            default_branch="main",
+            observed_at="2026-04-09T22:00:00+00:00",
+            complete=True,
+            global_warnings=[],
+            branches=[
+                BranchReport(
+                    name="main",
+                    tip_sha="sha1",
+                    excluded_reasons=["default-branch"],
+                    protection_status="known",
+                    role="base-only",
+                    lifecycle="base-only-stale-candidate",
+                    vetoes=[],
+                    warnings=[],
+                    recommendation="blocked",
+                    observed_at="2026-04-09T22:00:00+00:00",
+                ),
+                BranchReport(
+                    name="feature/open",
+                    tip_sha="sha2",
+                    excluded_reasons=[],
+                    protection_status="known",
+                    role="has-head-prs",
+                    lifecycle="active",
+                    vetoes=[],
+                    warnings=[],
+                    recommendation="keep",
+                    observed_at="2026-04-09T22:00:00+00:00",
+                    most_recent_head_pr_number=12,
+                ),
+                BranchReport(
+                    name="feature/review",
+                    tip_sha="sha3",
+                    excluded_reasons=[],
+                    protection_status="known",
+                    role="has-head-prs",
+                    lifecycle="merged",
+                    vetoes=[],
+                    warnings=["tip-differs-from-merged-head:7"],
+                    recommendation="review",
+                    observed_at="2026-04-09T22:00:00+00:00",
+                ),
+                BranchReport(
+                    name="feature/delete",
+                    tip_sha="sha4",
+                    excluded_reasons=[],
+                    protection_status="known",
+                    role="has-head-prs",
+                    lifecycle="merged",
+                    vetoes=[],
+                    warnings=[],
+                    recommendation="delete-candidate",
+                    observed_at="2026-04-09T22:00:00+00:00",
+                ),
+            ],
+        )
+        text = format_summary(report)
+        self.assertIn("Repository: owner/repo", text)
+        self.assertIn("Blocked (1)", text)
+        self.assertIn("- main: blocked because this is the default branch", text)
+        self.assertIn("- feature/open: keep because it has an open head PR (#12)", text)
+        self.assertIn("- feature/review: review because the branch moved after merged PR #7", text)
+        self.assertIn(
+            "- feature/delete: delete candidate because its head PRs were merged and no current blockers were found",
+            text,
         )
 
 

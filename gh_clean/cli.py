@@ -5,19 +5,24 @@ import sys
 
 from .config import ConfigError, SAMPLE_CONFIG
 from .delete import delete_branches, format_delete_json, format_delete_table
-from .github import GitHubError, ensure_gh_authenticated, ensure_gh_available
-from .report import format_json, format_table, generate_report
+from .github import GitHubError, ensure_gh_authenticated, ensure_gh_available, set_verbose
+from .report import format_json, format_summary, format_table, generate_report
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="gh-clean")
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print progress and GitHub API activity to stderr",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     report = subparsers.add_parser("report", help="Generate a cleanup report")
     report.add_argument("--repo", required=True, help="Repository in OWNER/REPO form")
     report.add_argument(
         "--format",
-        choices=["table", "json"],
+        choices=["table", "json", "summary"],
         default="table",
         help="Output format",
     )
@@ -94,6 +99,7 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
+        set_verbose(args.verbose)
         ensure_gh_available()
         ensure_gh_authenticated()
         if args.command == "report":
@@ -104,6 +110,8 @@ def main() -> int:
             )
             if args.format == "json":
                 print(format_json(report))
+            elif args.format == "summary":
+                print(format_summary(report))
             else:
                 print(format_table(report))
             return 0

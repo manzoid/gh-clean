@@ -3,11 +3,28 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 
 class GitHubError(RuntimeError):
     """Raised when gh api calls fail."""
+
+
+_VERBOSE = False
+
+
+def set_verbose(enabled: bool) -> None:
+    global _VERBOSE
+    _VERBOSE = enabled
+
+
+def log_verbose(message: str) -> None:
+    if not _VERBOSE:
+        return
+    stamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    print(f"[gh-clean {stamp}] {message}", file=sys.stderr)
 
 
 def ensure_gh_available() -> None:
@@ -19,6 +36,7 @@ def ensure_gh_available() -> None:
 
 
 def ensure_gh_authenticated() -> None:
+    log_verbose("checking gh auth status")
     proc = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True)
     if proc.returncode != 0:
         raise GitHubError(
@@ -36,6 +54,7 @@ class GitHubClient:
 
     def api(self, path: str) -> Any:
         cmd = ["gh", "api", path]
+        log_verbose(f"gh api {path}")
         proc = subprocess.run(cmd, capture_output=True, text=True)
         if proc.returncode != 0:
             raise GitHubError(proc.stderr.strip() or proc.stdout.strip())
@@ -43,12 +62,14 @@ class GitHubClient:
 
     def api_delete(self, path: str) -> None:
         cmd = ["gh", "api", "-X", "DELETE", path]
+        log_verbose(f"gh api DELETE {path}")
         proc = subprocess.run(cmd, capture_output=True, text=True)
         if proc.returncode != 0:
             raise GitHubError(proc.stderr.strip() or proc.stdout.strip())
 
     def graphql(self, query: str) -> Any:
         cmd = ["gh", "api", "graphql", "-f", f"query={query}"]
+        log_verbose("gh api graphql")
         proc = subprocess.run(cmd, capture_output=True, text=True)
         if proc.returncode != 0:
             raise GitHubError(proc.stderr.strip() or proc.stdout.strip())
@@ -59,6 +80,7 @@ class GitHubClient:
         page = 1
         while True:
             separator = "&" if "?" in path else "?"
+            log_verbose(f"paginate {path} page={page}")
             data = self.api(f"{path}{separator}per_page={per_page}&page={page}")
             if not isinstance(data, list):
                 raise GitHubError(f"Expected list response for {path}")

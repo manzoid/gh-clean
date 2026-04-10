@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Sequence
 from urllib.parse import quote
 
 from .github import GitHubClient
+from .github import log_verbose
 from .report import BranchReport, ReportResult, generate_report, load_report
 
 
@@ -63,7 +64,10 @@ def delete_branches(
     force_merged_tip_mismatch: bool,
     allow_tip_change: bool,
 ) -> DeleteRun:
+    log_verbose(f"starting delete for {repo}")
     prior_report = load_report(input_report_path) if input_report_path else None
+    if prior_report:
+        log_verbose(f"loaded prior report with {len(prior_report.branches)} branches")
     live_report = generate_report(
         repo,
         extra_excludes=list(extra_excludes or []),
@@ -79,11 +83,13 @@ def delete_branches(
 
     if not selected:
         raise ValueError("delete requires at least one selected branch")
+    log_verbose(f"selected {len(selected)} branches for deletion flow")
 
     client = GitHubClient(repo)
     results: List[DeleteResult] = []
 
     for name in selected:
+        log_verbose(f"evaluating delete candidate {name}")
         prior = prior_by_name.get(name)
         live = live_by_name.get(name)
 
@@ -156,6 +162,7 @@ def delete_branches(
 
         encoded = quote(f"heads/{name}", safe="")
         client.api_delete(f"repos/{repo}/git/refs/{encoded}")
+        log_verbose(f"deleted {name}")
         results.append(
             DeleteResult(
                 branch=name,

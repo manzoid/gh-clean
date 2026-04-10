@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
 
 from .config import resolve_repo_config
-from .github import GitHubClient, GitHubError
+from .github import GitHubClient, GitHubError, log_verbose
 
 
 def utc_now_iso() -> str:
@@ -75,6 +75,50 @@ class ReportResult:
             "global_warnings": self.global_warnings,
             "branches": [asdict(branch) for branch in self.branches],
         }
+
+
+def branch_summary_reason(branch: BranchReport) -> str:
+    if branch.recommendation == "blocked":
+        if any(reason.startswith("base-of-open-pr:") for reason in branch.vetoes):
+            numbers = [reason.split(":", 1)[1] for reason in branch.vetoes if reason.startswith("base-of-open-pr:")]
+            return "blocked because open PRs depend on this branch: " + ", ".join(f"#{number}" for number in numbers)
+        if "default-branch" in branch.excluded_reasons:
+            return "blocked because this is the default branch"
+        if "config-protected-branch" in branch.excluded_reasons:
+            return "blocked because this branch is listed in protected_branches"
+        rulesets = [reason.split(":", 1)[1] for reason in branch.excluded_reasons if reason.startswith("ruleset:")]
+        if rulesets:
+            return "blocked by ruleset " + ", ".join(rulesets)
+        if "branch-protected" in branch.excluded_reasons:
+            return "blocked by GitHub branch protection"
+    if branch.recommendation == "keep":
+        if branch.lifecycle == "active":
+            if branch.most_recent_head_pr_number:
+                return f"keep because it has an open head PR (#{branch.most_recent_head_pr_number})"
+            return "keep because it has an open head PR"
+    if branch.recommendation == "review":
+        for warning in branch.warnings:
+            if warning.startswith("tip-differs-from-merged-head:"):
+                return f"review because the branch moved after merged PR #{warning.split(':', 1)[1]}"
+            if warning.startswith("merged-into-non-default-base-not-contained:"):
+                return (
+                    "review because it merged into non-default base branch "
+                    f"{warning.split(':', 1)[1]} that is not yet proven contained in the default branch"
+                )
+            if warning == "tip-newer-than-pr-close":
+                return "review because commits were added after the branch's PRs were closed unmerged"
+        if branch.lifecycle == "closed-unmerged":
+            return "review because all head PRs were closed without merge"
+        if branch.lifecycle == "untracked":
+            return "review because no PR history was found for this branch"
+        if branch.lifecycle == "base-only-stale-candidate":
+            return "review because this branch is only used as a PR base and is not proven integrated"
+    if branch.recommendation == "delete-candidate":
+        if branch.lifecycle == "merged":
+            return "delete candidate because its head PRs were merged and no current blockers were found"
+        if branch.lifecycle == "integrated":
+            return "delete candidate because it was only used as a base branch and now appears integrated"
+    return "review manually"
 
 
 def match_ruleset_branch(ruleset: Dict[str, Any], repo_name: str, branch: str) -> bool:
@@ -268,6 +312,7 @@ def generate_report(
 ) -> ReportResult:
     client = GitHubClient(repo)
     observed_at = utc_now_iso()
+    log_verbose(f"starting report for {repo}")
 
     repo_meta = client.get_repo()
     repo_config = resolve_repo_config(
@@ -275,8 +320,11 @@ def generate_report(
         protected_branches_override=protected_branches_override,
     )
     default_branch = repo_meta["default_branch"]
+    log_verbose(f"default branch is {default_branch}")
     branches = client.get_branches()
+    log_verbose(f"loaded {len(branches)} branches")
     open_pulls = client.get_pulls(state="open")
+    log_verbose(f"loaded {len(open_pulls)} open pull requests")
     open_head_refs = {
         pr["head"]["ref"]
         for pr in open_pulls
@@ -284,12 +332,18 @@ def generate_report(
     }
     needs_closed_scan = any(branch["name"] not in open_head_refs for branch in branches)
     closed_pulls = client.get_pulls(state="closed") if needs_closed_scan else []
+    if needs_closed_scan:
+        log_verbose(f"loaded {len(closed_pulls)} closed pull requests")
     pulls = open_pulls + closed_pulls
     merged_numbers = [pr["number"] for pr in pulls if pr.get("merged_at")]
     merged_head_oids = client.get_pull_head_oids(merged_numbers)
+    log_verbose(f"loaded merge-time head oids for {len(merged_numbers)} merged pull requests")
     ruleset_summaries = client.get_ruleset_summaries()
     rulesets = [client.get_ruleset_detail(summary) for summary in ruleset_summaries]
+    log_verbose(f"loaded {len(rulesets)} rulesets")
     configured_protected_branches = sorted(set(repo_config.protected_branches + (extra_excludes or [])))
+    if configured_protected_branches:
+        log_verbose("protected branches: " + ", ".join(configured_protected_branches))
 
     matched_rulesets_by_branch = {
         branch["name"]: [
@@ -303,6 +357,7 @@ def generate_report(
     branch_commits: Dict[str, Dict[str, Any]] = {}
     unique_shas = sorted({branch["commit"]["sha"] for branch in branches})
     branch_commits = parallel_map_dict(unique_shas, client.get_commit, max_workers=12)
+    log_verbose(f"loaded {len(branch_commits)} commit objects")
 
     head_prs_by_branch: Dict[str, List[Dict[str, Any]]] = {}
     base_prs_by_branch: Dict[str, List[Dict[str, Any]]] = {}
@@ -338,6 +393,7 @@ def generate_report(
                 branches_needing_compare.add(merged_base)
     compare_status_by_branch: Dict[str, Optional[str]] = {}
     if branches_needing_compare:
+        log_verbose(f"running {len(branches_needing_compare)} compare checks")
         with ThreadPoolExecutor(max_workers=12) as executor:
             future_to_branch = {
                 executor.submit(client.compare, default_branch, name): name
@@ -386,6 +442,13 @@ def generate_report(
 
     order = {"blocked": 0, "review": 1, "delete-candidate": 2, "keep": 3}
     reports.sort(key=lambda item: (order.get(item.recommendation, 99), item.name))
+    log_verbose(
+        "report complete: "
+        + ", ".join(
+            f"{recommendation}={sum(1 for item in reports if item.recommendation == recommendation)}"
+            for recommendation in ["blocked", "keep", "review", "delete-candidate"]
+        )
+    )
     return ReportResult(
         repo=repo,
         default_branch=default_branch,
@@ -436,6 +499,39 @@ def format_table(report: ReportResult) -> str:
     output = [fmt(headers), fmt(["-" * width for width in widths])]
     output.extend(fmt(row) for row in rows)
     return "\n".join(output)
+
+
+def format_summary(report: ReportResult) -> str:
+    groups = ["blocked", "keep", "review", "delete-candidate"]
+    labels = {
+        "blocked": "Blocked",
+        "keep": "Keep",
+        "review": "Review",
+        "delete-candidate": "Delete Candidates",
+    }
+    lines = [
+        f"Repository: {report.repo}",
+        (
+            "Counts: "
+            + ", ".join(
+                f"{label.lower()}={sum(1 for branch in report.branches if branch.recommendation == key)}"
+                for key, label in labels.items()
+            )
+        ),
+    ]
+    if report.global_warnings:
+        lines.append("Warnings: " + "; ".join(report.global_warnings))
+
+    for key in groups:
+        branches = [branch for branch in report.branches if branch.recommendation == key]
+        if not branches:
+            continue
+        lines.append("")
+        lines.append(f"{labels[key]} ({len(branches)})")
+        for branch in branches:
+            lines.append(f"- {branch.name}: {branch_summary_reason(branch)}")
+
+    return "\n".join(lines)
 
 
 def format_json(report: ReportResult) -> str:

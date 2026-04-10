@@ -76,6 +76,7 @@ Generate a report:
 ```bash
 gh-clean report --repo OWNER/REPO
 gh-clean report --repo OWNER/REPO --format json
+gh-clean report --repo OWNER/REPO --format summary
 gh-clean report --repo OWNER/REPO --protected-branches main,staging,production
 ```
 
