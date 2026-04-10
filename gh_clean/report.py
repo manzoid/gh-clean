@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
 
-from .config import load_repo_config
+from .config import resolve_repo_config
 from .github import GitHubClient, GitHubError
 
 
@@ -261,12 +261,19 @@ def classify_branch(
     )
 
 
-def generate_report(repo: str, extra_excludes: Optional[List[str]] = None) -> ReportResult:
+def generate_report(
+    repo: str,
+    extra_excludes: Optional[List[str]] = None,
+    protected_branches_override: Optional[str] = None,
+) -> ReportResult:
     client = GitHubClient(repo)
     observed_at = utc_now_iso()
 
     repo_meta = client.get_repo()
-    repo_config = load_repo_config(client)
+    repo_config = resolve_repo_config(
+        client,
+        protected_branches_override=protected_branches_override,
+    )
     default_branch = repo_meta["default_branch"]
     branches = client.get_branches()
     open_pulls = client.get_pulls(state="open")

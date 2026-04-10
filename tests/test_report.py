@@ -1,7 +1,8 @@
 import unittest
+from unittest import mock
 
-from gh_clean.config import ConfigError, parse_config_yaml
-from gh_clean.report import classify_branch, match_ruleset_branch, recommendation_for
+from gh_clean.config import ConfigError, RepoConfig, parse_config_yaml, parse_protected_branches_csv
+from gh_clean.report import classify_branch, generate_report, match_ruleset_branch, recommendation_for
 
 
 def make_branch(name: str, sha: str = "abc123", protected: bool = False):
@@ -171,6 +172,49 @@ class ConfigTests(unittest.TestCase):
     def test_parse_config_yaml_rejects_empty(self):
         with self.assertRaises(ConfigError):
             parse_config_yaml("protected_branches:\n")
+
+    def test_parse_protected_branches_csv(self):
+        self.assertEqual(
+            parse_protected_branches_csv("main, staging ,production"),
+            ["main", "staging", "production"],
+        )
+
+    def test_parse_protected_branches_csv_rejects_empty(self):
+        with self.assertRaises(ConfigError):
+            parse_protected_branches_csv(" , ")
+
+
+class GenerateReportOverrideTests(unittest.TestCase):
+    @mock.patch("gh_clean.report.parallel_map_dict")
+    @mock.patch("gh_clean.report.resolve_repo_config")
+    @mock.patch("gh_clean.report.GitHubClient")
+    def test_generate_report_uses_cli_protected_branches_override(
+        self,
+        mock_client_cls,
+        mock_resolve_repo_config,
+        mock_parallel_map_dict,
+    ):
+        client = mock.Mock()
+        mock_client_cls.return_value = client
+        client.get_repo.return_value = {"default_branch": "main", "name": "repo"}
+        client.get_branches.return_value = [make_branch("main")]
+        client.get_pulls.return_value = []
+        client.get_pull_head_oids.return_value = {}
+        client.get_ruleset_summaries.return_value = []
+        client.get_commit.return_value = make_commit()
+        mock_parallel_map_dict.return_value = {"abc123": make_commit()}
+        mock_resolve_repo_config.return_value = RepoConfig(protected_branches=["main", "staging"])
+
+        report = generate_report(
+            "owner/repo",
+            protected_branches_override="main,staging",
+        )
+
+        self.assertEqual(report.branches[0].name, "main")
+        mock_resolve_repo_config.assert_called_once_with(
+            client,
+            protected_branches_override="main,staging",
+        )
 
 
 if __name__ == "__main__":

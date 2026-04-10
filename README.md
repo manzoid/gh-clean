@@ -62,6 +62,13 @@ protected_branches:
 This list is checked in addition to GitHub branch protection rules and
 rulesets.
 
+If you need a one-off run before the config is committed, you can bypass
+the remote file with a CLI override:
+
+```bash
+gh-clean report --repo OWNER/REPO --protected-branches main,staging,production
+```
+
 ## Usage
 
 Generate a report:
@@ -69,6 +76,7 @@ Generate a report:
 ```bash
 gh-clean report --repo OWNER/REPO
 gh-clean report --repo OWNER/REPO --format json
+gh-clean report --repo OWNER/REPO --protected-branches main,staging,production
 ```
 
 Add extra protected branches at runtime:
@@ -83,6 +91,7 @@ Delete from a prior report with re-validation:
 gh-clean report --repo OWNER/REPO --format json > report.json
 gh-clean delete --repo OWNER/REPO --input report.json --recommendation delete-candidate --dry-run
 gh-clean delete --repo OWNER/REPO --input report.json --recommendation delete-candidate
+gh-clean delete --repo OWNER/REPO --input report.json --recommendation delete-candidate --protected-branches main,staging,production
 ```
 
 Delete specific branches:

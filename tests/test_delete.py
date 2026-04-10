@@ -58,6 +58,7 @@ class DeleteTests(unittest.TestCase):
             input_report_path=None,
             recommendation=None,
             extra_excludes=[],
+            protected_branches_override=None,
             dry_run=True,
             force_merged_tip_mismatch=False,
             allow_tip_change=False,
@@ -82,6 +83,7 @@ class DeleteTests(unittest.TestCase):
             input_report_path=None,
             recommendation=None,
             extra_excludes=[],
+            protected_branches_override=None,
             dry_run=True,
             force_merged_tip_mismatch=True,
             allow_tip_change=False,
@@ -100,12 +102,37 @@ class DeleteTests(unittest.TestCase):
             input_report_path="/tmp/report.json",
             recommendation="delete-candidate",
             extra_excludes=[],
+            protected_branches_override=None,
             dry_run=True,
             force_merged_tip_mismatch=False,
             allow_tip_change=False,
         )
         self.assertEqual(run.results[0].status, "skipped")
         self.assertIn("tip changed", run.results[0].reason)
+
+    @mock.patch("gh_clean.delete.generate_report")
+    def test_passes_protected_branches_override_to_live_report(self, mock_generate_report):
+        mock_generate_report.return_value = report(
+            branch("feature/a", recommendation="delete-candidate")
+        )
+
+        delete_branches(
+            repo="owner/repo",
+            branch_names=["feature/a"],
+            input_report_path=None,
+            recommendation=None,
+            extra_excludes=[],
+            protected_branches_override="main,staging,production",
+            dry_run=True,
+            force_merged_tip_mismatch=False,
+            allow_tip_change=False,
+        )
+
+        mock_generate_report.assert_called_once_with(
+            "owner/repo",
+            extra_excludes=[],
+            protected_branches_override="main,staging,production",
+        )
 
 
 if __name__ == "__main__":

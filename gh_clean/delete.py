@@ -58,12 +58,17 @@ def delete_branches(
     input_report_path: Optional[str],
     recommendation: Optional[str],
     extra_excludes: Optional[Sequence[str]],
+    protected_branches_override: Optional[str],
     dry_run: bool,
     force_merged_tip_mismatch: bool,
     allow_tip_change: bool,
 ) -> DeleteRun:
     prior_report = load_report(input_report_path) if input_report_path else None
-    live_report = generate_report(repo, extra_excludes=list(extra_excludes or []))
+    live_report = generate_report(
+        repo,
+        extra_excludes=list(extra_excludes or []),
+        protected_branches_override=protected_branches_override,
+    )
     live_by_name = _index_branches(live_report)
     prior_by_name = _index_branches(prior_report) if prior_report else {}
     selected = _selected_branch_names(
